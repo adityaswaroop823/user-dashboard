@@ -1,20 +1,31 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Box, Button, FormControl, FormLabel, Input, useToast, Heading, Table, Thead, Tbody, Tr, Th, Td, Spinner, Flex } from '@chakra-ui/react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
+
+const fetchUsers = async (page: number) => {
+  const response = await axios.get(`https://reqres.in/api/users?page=${page}`);
+  return response.data;
+};
+
+const addUser = async (newUser: { name: string; job: string }) => {
+  const response = await axios.post('https://reqres.in/api/users', newUser, {
+    headers: {
+      'x-api-key': 'reqres-free-v1',
+    },
+  });
+  return response.data;
+};
 
 const AddUser = () => {
   const [newUser, setNewUser] = useState({ name: '', job: '' });
-  const [users, setUsers] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const toast = useToast();
+  const queryClient = useQueryClient();
 
-  const fetchUsers = async (page: number) => {
-    setIsLoading(true);
-    try {
-      const response = await axios.get(`https://reqres.in/api/users?page=${page}`);
-      setUsers(response.data.data);
-    } catch (error) {
+  const { data, isLoading, isError } = useQuery(['users', currentPage], () => fetchUsers(currentPage), {
+    keepPreviousData: true,
+    onError: () => {
       toast({
         title: 'Error',
         description: 'Failed to load users. Please try again.',
@@ -22,41 +33,22 @@ const AddUser = () => {
         duration: 5000,
         isClosable: true,
       });
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    },
+  });
 
-  useEffect(() => {
-    fetchUsers(currentPage);
-  }, [currentPage]);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    try {
-      const response = await axios.post(
-        'https://reqres.in/api/users',
-        {
-          name: newUser.name,
-          job: newUser.job,
-        },
-        {
-          headers: {
-            'x-api-key': 'reqres-free-v1',
-          },
-        }
-      );
+  const mutation = useMutation(addUser, {
+    onSuccess: (data) => {
       toast({
         title: 'User Created',
-        description: `User ${response.data.name} with job ${response.data.job} was created successfully.`,
+        description: `User ${data.name} with job ${data.job} was created successfully.`,
         status: 'success',
         duration: 5000,
         isClosable: true,
       });
       setNewUser({ name: '', job: '' });
-      fetchUsers(currentPage);
-    } catch (error) {
+      queryClient.invalidateQueries(['users', currentPage]); 
+    },
+    onError: () => {
       toast({
         title: 'Error',
         description: 'Failed to create user. Please try again.',
@@ -64,8 +56,16 @@ const AddUser = () => {
         duration: 5000,
         isClosable: true,
       });
-    }
+    },
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    mutation.mutate(newUser);
   };
+
+  const users = data?.data || [];
+  const totalPages = data?.total_pages || 0;
 
   return (
     <Box width="80%" margin="auto" padding="20px" boxShadow="lg" borderRadius="8px">
@@ -93,7 +93,7 @@ const AddUser = () => {
             required
           />
         </FormControl>
-        <Button colorScheme="teal" width="100%" type="submit">
+        <Button colorScheme="teal" width="100%" type="submit" isLoading={mutation.isLoading}>
           Add User
         </Button>
       </form>
@@ -105,6 +105,8 @@ const AddUser = () => {
           <Flex justify="center">
             <Spinner size="lg" />
           </Flex>
+        ) : isError ? (
+          <Box>Error loading users.</Box>
         ) : (
           <Table variant="simple">
             <Thead>
@@ -116,7 +118,7 @@ const AddUser = () => {
               </Tr>
             </Thead>
             <Tbody>
-              {users.map((user) => (
+              {users.map((user: any) => (
                 <Tr key={user.id}>
                   <Td>{user.id}</Td>
                   <Td>{user.first_name} {user.last_name}</Td>
@@ -131,14 +133,14 @@ const AddUser = () => {
         )}
         <Flex justify="center" marginTop="20px">
           <Button
-            onClick={() => setCurrentPage(currentPage - 1)}
+            onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
             isDisabled={currentPage === 1}
             marginRight="10px"
           >
             Previous
           </Button>
           <Button
-            onClick={() => setCurrentPage(currentPage + 1)}
+            onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
             isDisabled={isLoading}
           >
             Next
